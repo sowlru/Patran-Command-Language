@@ -13,7 +13,7 @@ To compile function beam1D.pcl into beam.plb:
 9. Add line in C:\appl\MSC\Patran_x64\20170\p3epilog.sys: !!library "C:\avk\test\patran\beam.plb" before ui_Write(...)
 
 To run this function:
-1. Put _run.bat in working folder. This batch file run Patran and auto-delete old analysis files (t.*, *.ini, .jou, ..)
+1. Put _run.bat in working folder and double click. This batch file run Patran and auto-delete old analysis files (t.*, *.ini, .jou, ..)
 2. Enter beam(1., 1., 0.1, 10., 1) in command line in the bottom of Patran window.
 3. Example analysis will run. 
 4. Function parameters: beam(width, height, thk, length, mat_code). 
