@@ -1,0 +1,280 @@
+# Create simple supported beam (width, height, thk, length, shape, mat_code) -> stress
+FUNCTION beam(width, height, thk, length, mat_code)
+REAL width, height, thk, length; INTEGER mat_code
+
+uil_file_new.go( "C:\appl\MSC\Patran_x64\20170/template.db", "C:\avk\test\patran\t.db" )
+INTEGER	i_num = 1, num_nodes = 3
+REAL r_x = 0.0, E
+STRING s_coord[VIRTUAL], p[VIRTUAL], line[VIRTUAL]
+
+# first node create separately from others
+asm_const_grid_xyz(str_from_integer(i_num), "[0 0 0]", "Coord 0", p)
+
+FOR (i_num = 2 to num_nodes)
+# 1.POINTS | --------------------------------------------------
+	r_x += length/(num_nodes - 1);
+	s_coord = "[" // str_from_real(r_x) // " 0 0]"
+	asm_const_grid_xyz(str_from_integer(i_num), s_coord, "Coord 0", p)
+# 2.LINES | --------------------------------------------------
+	STRING s_prev[10]; s_prev = "Point " // str_from_integer(i_num - 1)
+	STRING s_cur[10];   s_cur = "Point " // str_from_integer(i_num)
+	asm_const_line_2point(str_from_integer(i_num - 1), s_prev, s_cur, 0, "", 50., 1, line)
+END FOR
+# 3.MESH | --------------------------------------------------
+STRING s_curve_select[VIRTUAL];   s_curve_select = "Curve 1:" // str_from_integer(num_nodes - 1)
+#this value to use new numbering control scheme
+INTEGER i_flag; i_flag = 16384
+REAL global_edge_length; global_edge_length = length/20
+INTEGER n, el; STRING n_[VIRTUAL], el_[VIRTUAL]
+fem_create_mesh_curv_1( @
+	s_curve_select, i_flag, global_edge_length, @
+	"Bar2", "#", "#", "Coord 0", "Coord 0", n, el, n_, el_)
+	
+# 4.MATERIAL | --------------------------------------------------
+SWITCH(mat_code)
+	CASE (11)
+		E = 10.5
+	DEFAULT
+		E = 10.0
+END SWITCH
+STRING sa_prop_values[64](4)
+sa_prop_values(1) = str_from_real(E*1000000); sa_prop_values(2) = "0.3"
+sa_prop_values(3) = "0.1" ; sa_prop_values(4) = ""
+
+material.create( "Analysis code ID", 1, "Analysis type ID", 1, "m1", 0, "", "Isotropic", 1, "Directionality", 1, "Linearity", 1, "Homogeneous", 0, "Linear Elastic", 1, "Model Options & IDs", ["", "", "", "", ""], [0, 0, 0, 0,  0], "Active Flag", 1, "Create", 10, "External Flag", FALSE, "Property  IDs", ["Elastic Modulus", "Poisson Ratio"], [2, 5, 0], @
+"Property Values", sa_prop_values )
+
+# 5.CROSS-SECTIONS | --------------------------------------------------
+STRING s_dimI[64](6);
+s_dimI(1) = str_from_real(height); s_dimI(2) = str_from_real(width); s_dimI(3) = str_from_real(width);
+s_dimI(4) = s_dimI(5) = s_dimI(6) = str_from_real(thk);  
+beam_section_create( "I-section", "I",   s_dimI )
+
+# 6.PROPERTIES | after 11: 2=bar | 36=beam | --------------------------------------------------
+elementprops_create( "p", 11, 36, 42, 1, 1, 20, @
+[39, 13, 6, 4042, 4043, 2047, 2048, 1, 10, 11, 4026, 1026, 4044, 4045, 4037, 4047, 4048, 4050, 4051, 4053, 4054, 4056, 4057, 8112, 4061, 4303, 8111, 4403, 4404, 4410, 4411, 8200, 8201, 8202], @
+[11, 5, 2, 2, 2, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 6, 4, 4, 1, 1, 1, 6, 4, 4, 4], @
+["I-section", "m:m1", "<0 1 0>", "<0 0 0>", "<0 0 0>", "RZ", "RZ", "0.1", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "Analysis", "Analysis", "Analysis"], @
+s_curve_select )
+# 7.BOUNDARIES | --------------------------------------------------
+loadsbcs_create2( "n1", "Displacement", "Nodal", "", "Static", ["Point 1"], "Geometry", "Coord 0", "1.", ["<0,0,0>", "<0,0,0>", "", ""], ["", "", "", ""] )
+loadsbcs_create2( "n3", "Displacement", "Nodal", "", "Static", ["Point 3"], "Geometry", "Coord 0", "1.", ["<0,0,>", "", "", ""], ["", "", "", ""] )
+# 8.LOADS | --------------------------------------------------
+loadsbcs_create2( "c",    "Force", "Nodal", "", "Static", ["Point 2"], "Geometry", "Coord 0", "1.", ["<0, -100,0>", "", "", ""], ["", "", "", ""] )
+
+# 9.EQUIVALENCE | --------------------------------------------------
+REAL eq; INTEGER eq_; fem_equiv_all_group4( [" "], 0, "", 1, 1, 0.005, FALSE, eq, eq_ )
+
+# 10.DISPLAY | --------------------------------------------------
+gu_fit_view(  ); point_size( 9 ); point_label( TRUE ); curve_label( TRUE ); node_size( 9 )
+
+# 11.ANALYSIS | --------------------------------------------------
+jobfile.open( "t", "ANALYZE NO JOBFILE" )
+msc_delete_old_files( "t", ".bdf", ".op2" )
+jobfile.write_spl( "/* Jobfile for PATNAS created %A% at %A% */", ["10-Dec-18", "16:08:19"] )
+jobfile.writec( "", "TRANSLATOR = pat3nas" )
+jobfile.writec( "DATABASE", "C:\avk\test\patran\t.db" )
+jobfile.writec( "JOBNAME", "t" )
+jobfile.writec( "ANALYSIS TITLE", "static" )
+jobfile.writec( "ANALYSIS SUBTITLE", "" )
+jobfile.writec( "ANALYSIS LABEL", "" )
+jobfile.writec( "OBJECT", "Entire Model" )
+jobfile.writec( "METHOD", "Full Run" )
+jobfile.writec( "", "" )
+jobfile.writec( "MODEL SUFFIX", ".bdf" )
+jobfile.writec( "RESULTS SUFFIX", ".op2" )
+jobfile.writec( "", "/*" )
+jobfile.writec( "", " * Translation Parameters" )
+jobfile.writec( "", " */" )
+jobfile.writec( "DATA OUTPUT", "XDB+PRINT" )
+jobfile.writec( "OUTPUT2 REQUESTS", "P3 Built In" )
+jobfile.writec( "OUTPUT2 FORMAT", "Binary" )
+jobfile.writec( "DIVISION TOLERANCE", "1.0e-08" )
+jobfile.writec( "NUMERICAL TOLERANCE", "1.0e-04" )
+jobfile.writec( "WRITING TOLERANCE", "1.0e-21" )
+jobfile.writec( "GEOM CHECK", "INFORM" )
+jobfile.writec( "SORTED BULK", "NO" )
+jobfile.writec( "CARD FORMAT", "either" )
+jobfile.writec( "NODE COORDINATES", "reference frame" )
+jobfile.writec( "COORD COORDINATES", "global" )
+jobfile.writec( "MSC.Nastran VERSION", "2017." )
+jobfile.writec( "WRITE STORED PRECISION", "TRUE" )
+jobfile.writec( "PROPS ON ELEM ENTRY", "FALSE" )
+jobfile.writec( "CONTINUATION ENTRY", "FALSE" )
+jobfile.writec( "PCOMPG ENTRY", "TRUE" )
+jobfile.writec( "CONVERT CBAR CBEAM", "FALSE" )
+jobfile.writec( "ITERATIVE SOLVER", "FALSE" )
+jobfile.writei( "SUPER ELEMENT 0", 0 )
+jobfile.writec( "SEALL WRITE", "FALSE" )
+jobfile.writec( "PART SUPERELEMENT CREATE", "TRUE" )
+jobfile.writec( "AUTOQSET", "FALSE" )
+jobfile.writec( "FIXEDB", "FALSE" )
+jobfile.writei( "SUPER TREE COUNT", 0 )
+jobfile.writec( "MODEL TOLERANCE", "0.0049999999" )
+jobfile.writec( "ELEMENT PROPERTY OFFSET", "0" )
+jobfile.writec( "MATERIAL PROPERTY OFFSET", "0" )
+jobfile.writec( "TABLE OFFSET", "0" )
+jobfile.writec( "LOAD SET OFFSET", "0" )
+jobfile.writec( "LOAD CASE OFFSET", "0" )
+jobfile.writec( "CONTROL SET OFFSET", "0" )
+jobfile.writec( "RIGID ELEMENT OFFSET", "0" )
+jobfile.writec( "SCALAR POINT OFFSET", "0" )
+jobfile.writec( "BEGINNING CONTINUATION MARKER", "+      A" )
+jobfile.writec( "NUMBER ONLY", "ON" )
+jobfile.writec( "BEGINNING NUMBER", "OFF" )
+jobfile.writec( "TRAILING NUMBER", "OFF" )
+jobfile.writec( "SYNTAX NUMBER", "ON" )
+jobfile.writec( "SYNTAX MARKER", "." )
+jobfile.writec( "EXTERNAL SUPERELEMENT METHOD", "NONE" )
+jobfile.writec( "GRID COORDINATES ROUNDING", "15" )
+jobfile.writec( "COORD DATA PRECISION ROUNDING", "15" )
+jobfile.writec( "MPC DATA PRECISION ROUNDING", "15" )
+jobfile.writec( "LBC DATA PRECISION ROUNDING", "7" )
+jobfile.writec( "MAT DATA PRECISION ROUNDING", "15" )
+jobfile.writec( "PROP DATA PRECISION ROUNDING", "7" )
+jobfile.writec( "", "/* === Solution Parameters === */" )
+jobfile.writec( "SOLUTION TYPE", "LINEAR STATIC" )
+jobfile.writei( "SOLUTION SEQUENCE", 101 )
+jobfile.writec( "DATABASE RUN", "ON" )
+jobfile.writec( "CYCLIC SYMMETRY", "OFF" )
+jobfile.writec( "AUTOMATIC CONSTRAINTS", "ON" )
+jobfile.writec( "INERTIA RELIEF", "OFF" )
+jobfile.writec( "ALTERNATE REDUCTION", "OFF" )
+jobfile.writec( "SHELL NORMAL TOLERANCE", "" )
+jobfile.writec( "MASS CALCULATION", "Lumped" )
+jobfile.writec( "DATA DECK ECHO", "None" )
+jobfile.writec( "PLATE RZ STIFFNESS FACTOR", "100.0" )
+jobfile.writec( "MAXIMUM PRINTED LINES", "" )
+jobfile.writec( "MAXIMUM RUN TIME", "" )
+jobfile.writec( "WT-MASS CONVERSION", "1.0" )
+jobfile.writec( "NODE ID FOR WT-GENER", "" )
+jobfile.writec( "RIGID ELEMENT TYPE", "LINEAR" )
+jobfile.writec( "USE SOL600", "OFF" )
+jobfile.writei( "CONTACT-SEGMENT-CONTROL METHOD", 0 )
+jobfile.writei( "CONTACT-DEFORMABLE-DEFORMABLE METHOD", 0 )
+jobfile.writei( "CONTACT-CRITERION", 0 )
+jobfile.writei( "CONTACT-DERIVATION", 0 )
+jobfile.writei( "CONTACT-REL_ABS", 0 )
+jobfile.writec( "USE SOL700", "OFF" )
+jobfile.writec( "SN MEAN STRESS CORRECTION", "NONE" )
+jobfile.writec( "NEF FATIGUE STRESS OUTPUT", "NONE" )
+jobfile.writec( "NEF STRESS UNITS", "MPA" )
+jobfile.writec( "NEF STRESS COMBINATION", "ABSMAXPR" )
+jobfile.writec( "NEF RESULT LOCATION", "NODA" )
+jobfile.writec( "NEF RECOVERY LOCATION", "CORNER" )
+jobfile.writec( "NEF LAYER LOCATION", "WORST" )
+jobfile.writec( "NEF INTERPOLATION LIMIT", "0" )
+jobfile.writec( "NEF LEVEL OF MESSAGE", "0" )
+jobfile.writec( "NEF NUMBER OF THREADS", "1" )
+jobfile.writer( "NEF CERTAINTY OF SURVIVAL", 50. )
+jobfile.writer( "NEF OVERALL SCALE FACTOR", 1. )
+jobfile.writer( "NEF TOP STRESS PERCENTAGE FILTER", 100. )
+jobfile.writer( "NEF TOP DAMAGE PERCENTAGE FILTER", 100. )
+jobfile.writec( "NEF TIME HISTORY DIRECTORY", "C:\Users\gj284c" )
+jobfile.writei( "NEF MAX LOAD PER EVENT", 1 )
+jobfile.writec( "NEF EVENT DATA", "0" )
+jobfile.writec( "NEF LOAD SEQUENCE DATA", "0" )
+jobfile.writec( "USE CONTACT TABLE", "OFF" )
+jobfile.writec( "INITIAL CONTACTPAIR LOADCASE NAME", "" )
+jobfile.writei( "MDOF DATA", 0 )
+jobfile.writec( "CELL WRITE", "ON" ); jobfile.writei( "CELL INPUT 0", 0 )
+jobfile.writec( "FMS WRITE",  "ON" ); jobfile.writei( "FMS INPUT 0",  0 )
+jobfile.writec( "EXEC WRITE", "ON" ); jobfile.writei( "EXEC INPUT 0", 0 )
+jobfile.writec( "CASE WRITE", "ON" ); jobfile.writei( "CASE INPUT 0", 0 )
+jobfile.writec( "BULK WRITE", "ON" ); jobfile.writei( "BULK INPUT 0", 0 )
+jobfile.writec( "CELL DTI POSITION", "START" )
+jobfile.writec( "FMS DTI POSITION", "START" )
+jobfile.writec( "EXEC DTI POSITION", "START" )
+jobfile.writec( "CASE DTI POSITION", "START" )
+jobfile.writec( "BULK DTI POSITION", "START" )
+jobfile.writec( "", "END" ); jobfile.close(  )
+
+mscnastran_subcase.create( "101", "Default", "This is a default subcase." )
+mscnastran_subcase.create_char_param( "LOAD CASE", "Default" )
+mscnastran_subcase.create_char_param( "SUBCASE TITLE", "This is a default subcase." )
+mscnastran_subcase.create_char_param( "SUBCASE SUBTITLE", "Default" )
+mscnastran_subcase.create_char_param( "SUBCASE LABEL", " STATIC;-" )
+mscnastran_subcase.create_char_param( "SUBCASE TITLE FLAG", "OFF" )
+mscnastran_subcase.create_char_param( "SUBCASE SUBTITLE FLAG", "ON" )
+mscnastran_subcase.create_char_param( "SUBCASE LABEL FLAG", "OFF" )
+mscnastran_subcase.create_char_param( "Default", "STRUCTURAL" )
+mscnastran_subcase.create_char_param( "DISPLACEMENTS", "1" )
+mscnastran_subcase.create_char_param( "DISPLACEMENTS 1","DISPLACEMENT(SORT1,REAL)=0" )
+mscnastran_subcase.create_char_param( "ELEMENT STRESSES", "1" )
+mscnastran_subcase.create_char_param( "ELEMENT STRESSES 1", "STRESS(SORT1,REAL,VONMISES,BILIN)=0;PARAM,NOCOMPS,1" )
+mscnastran_subcase.create_char_param( "CONSTRAINT FORCES", "1" )
+mscnastran_subcase.create_char_param( "CONSTRAINT FORCES 1","SPCFORCES(SORT1,REAL)=0" )
+mscnastran_subcase.create_char_param( "ELEMENT FORCES", "1" )
+mscnastran_subcase.create_char_param( "ELEMENT FORCES 1","FORCE(SORT1,REAL,BILIN)=0" )
+mscnastran_subcase.create_char_param( "GRID POINT FORCE BALANCE", "1" )
+mscnastran_subcase.create_char_param( "GRID POINT FORCE BALANCE 1","GPFORCE=0" )
+mscnastran_subcase.create_char_param( "SUBCASE WRITE", "ON" )
+mscnastran_subcase.create_char_param( "SUBCASE DIRECT TEXT POS", "OFF" )
+mscnastran_subcase.create_int_param( "SUBCASE INPUT 0", 0 )
+mscnastran_subcase.create_char_param( "INCREMENT TYPE CODE SOL 101","LCNTSTAT" )
+mscnastran_subcase.create_char_param( "INCREMENT TYPE SOL 101", "Linear Contact (LCNT)" )
+mscnastran_subcase.create_char_param( "ANALYSIS PREFERENCE CTRLDEF SOL 101", "Default (Blank)" )
+mscnastran_subcase.create_char_param( "PERFORM ERROR ANALYSIS", "ON" )
+mscnastran_subcase.create_char_param( "ROTOR DYNAMICS", "OFF" )
+mscnastran_subcase.create_char_param( "ALL EXPLICIT MPCS", "ON" )
+mscnastran_job.associate_subcases( "101", "t", 1, ["Default"] )
+analysis_submit_2( "MSC.Nastran", "t" )
+
+# 12.RESULTS | --------------------------------------------------
+LOGICAL ok; ok = ui_read_logical( "Show result?" )
+msc_dra_init_stream(  )
+msc_dra_add_param( "DATABASE", "C:\avk\test\patran\t.db" )
+msc_dra_add_param( "JOBNAME", "t" )
+msc_dra_add_param( "RESULTS FILE", "C:\avk\test\patran\t.xdb" )
+msc_dra_add_param( "OBJECT", "Result Entities" )
+msc_dra_add_param( "ANALYSIS TYPE", "Structural" )
+msc_dra_add_param( "DIVISION TOLERANCE", "1.0E-8" )
+msc_dra_add_param( "NUMERICAL TOLERANCE", "1.0E-4" )
+msc_dra_add_param( "MODEL TOLERANCE", "0.005" )
+msc_dra_add_param( "ROTATIONAL NODAL RESULTS", "OFF" )
+msc_dra_add_param( "STRESS/STRAIN INVARIANTS", "OFF" )
+msc_dra_add_param( "PRINCIPAL DIRECTIONS", "OFF" )
+msc_dra_add_param( "ELEMENT RESULTS POSITIONS", "Nodal       " )
+msc_dra_add_param( "TITLE DESCRIPTION", "ON" )
+msc_dra_finish_stream(  )
+analysis_import( "MSC.Nastran", "t", "Attach Results File No Job", "C:\avk\test\patran\t.xdb", TRUE )
+
+# 13.RANGE | --------------------------------------------------
+ga_range_create_m("Fri_default_Fringe", 2 )
+# 7:white color | 0:fixed, 1:exp, 2:integer | 10:size | 1:decimal |
+ga_db_range_set_label_style_m( 1,7, 0, 10, 1, 2, "Fri_default_Fringe" )
+ga_db_range_set_subranges_flt_m( 15, @
+[100, 93.3, 86.7, 80, 73.3, 66.7, 60, 53.3, 46.7, 40, 33.3, 26.7, 20, 13.3, 6.7], @
+[93.3, 86.7, 80, 73.3, 66.7, 60, 53.3, 46.7, 40, 33.3, 26.7, 20, 13.3, 6.7, 0], @
+[96.7, 90, 83.3, 76.7, 70, 63.3, 56.7, 50, 43.3, 36.7, 30, 23.3, 16.7, 10, 3.3],2, "Fri_default_Fringe" )
+
+# 14.FRINGE | --------------------------------------------------
+res_data_load_dbresult( 0, "Nodal", "Scalar", "Default", "A1:Static Subcase", "Beam Stresses", "Maximum Combined", "At Center", "", "Default", "DeriveAverage", "All", "ShapeFunc" )
+res_data_title( 0, "Nodal", "Scalar", 1, ["$POFF@@@$PT: @@@$LCN, @@@$SCN, @@@$PRN, @@@$SRN, @@@$DRVL, @@@$LN "] )
+res_display_fringe_create( "", "FreeFaces", 0, [""], 12, ["Range:Fri_default_Fringe", "RangeOverwrite:ON", "FringeStyle:Discrete/Smooth", "Shade:None", "ElemEdge:ElemEdge,Blue,Solid,1", "Shrink:10", "TitleDisplay:ON", "MinMaxDisplay:ON", "ValueDisplay:OFF", "Filter:None",  "ScaleFactor:1.", "LabelStyle:Fixed, 10, Red, 1"], TRUE )
+res_display_fringe_post( "", 0, "Nodal", TRUE, TRUE )
+
+# 15.DEFORM | --------------------------------------------------
+res_data_load_dbresult( 0, "Nodal", "Vector", "Default", "A1:Static Subcase", "Displacements", "Translational", "(NON-LAYERED)", "", "Global", "", "", "" )
+res_data_title( 0, "Nodal", "Vector", 1, ["$POFF@@@$PT: @@@$LCN, @@@$SCN, @@@$PRN, @@@$SRN, @@@$DRVL"] )
+res_display_deformation_create( "", "Elements", 0, [""], 9, ["DeformedStyle:White,Solid,1,Wireframe", "DeformedScale:Model=0.1", "UndeformedStyle:ON,Blue,Dash,1,Wireframe", "TitleDisplay:ON", "MinMaxDisplay:ON", "ScaleFactor:1.", "LabelStyle:Fixed, 10, Yellow, 3", "DeformDisplay:Resultant", "DeformComps:OFF,OFF,OFF"] )
+res_display_deformation_post( "", 0 )
+
+# 16.VALIDATION | --------------------------------------------------
+REAL height_mid; height_mid = height - 2 * thk
+REAL stat_bot; stat_bot = width * thk * (thk/2)
+REAL stat_mid; stat_mid = thk * height_mid * (height_mid/2 + thk)
+REAL stat_top; stat_top = width * thk * (height - thk/2)
+REAL stat; 	stat = stat_bot + stat_mid + stat_top
+REAL area; area = 2 * width * thk + thk * height_mid
+REAL cg_dist; cg_dist = stat/area
+REAL Jx_na_bot; Jx_na_bot = width * thk * thk * thk/12
+REAL Ay2_bot; Ay2_bot = width * thk * (cg_dist - thk/2) * (cg_dist - thk/2)
+REAL Jx_na_mid; Jx_na_mid = thk * height_mid * height_mid * height_mid/12
+REAL Jx; Jx = 2 * (Jx_na_bot + Ay2_bot) + Jx_na_mid
+REAL Mx; Mx = (100/2) * (length/2)
+REAL fx; fx = Mx * cg_dist/Jx
+
+write_line("area = ", area, " Jx = ", Jx, " Mx = ", Mx, " fx = ", fx)
+# beam(1., 1., 0.1, 10., 1)
+END FUNCTION
